@@ -1,0 +1,407 @@
+"""
+SHORT TRIP GAS PRICE INTELLIGENCE
+Python FastAPI — Main Entry Point
+GarudX.AI | June 2026
+"""
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import uvicorn
+import asyncio
+import logging
+from datetime import datetime
+
+import os
+import sys
+
+# Fix Windows UTF-8 encoding for emoji logging
+if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
+from dotenv import load_dotenv
+load_dotenv(dotenv_path="../.env")
+
+from gasbuddy import fetch_gasbuddy_prices
+from osm_places import find_competitors_nearby          # OpenStreetMap (FREE)
+from comparator import run_price_comparison, build_daily_summary
+from notifier import send_alert_notification, send_daily_summary_email
+from scraper import scrape_store_locations
+from database import get_all_stores, save_price_history, save_alert, get_db_connection, upsert_competitors, save_competitor_price, get_competitors_from_db
+
+SEARCH_RADIUS = float(os.getenv("SEARCH_RADIUS_MILES", "2.0"))
+
+# Semaphore: max 3 stores checked concurrently (avoid Overpass 429 rate limits)
+_osm_semaphore = asyncio.Semaphore(3)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("shorttrip_engine.log", encoding='utf-8')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# ── FastAPI App ──────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("[START] Short Trip Price Engine starting up...")
+    # Launch background scheduler (auto price checks every 2 hours)
+    scheduler_task = asyncio.create_task(_background_scheduler())
+    yield
+    scheduler_task.cancel()
+    logger.info("[STOP] Short Trip Price Engine shutting down...")
+
+app = FastAPI(
+    title="Short Trip Gas Price Engine",
+    description="Automated competitor gas price monitoring for Short Trip Gas Stations",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS — allow Node.js API to call this
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3001", "https://shorttrip-api.garudx.ai"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Health Check ─────────────────────────────────────────────
+@app.get("/")
+def root():
+    return {
+        "status": "running",
+        "service": "Short Trip Gas Price Engine",
+        "version": "1.0.0",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+# ── Run Full Price Check (All Stores) ────────────────────────
+@app.post("/engine/run")
+async def run_full_check(background_tasks: BackgroundTasks):
+    """
+    Triggered by n8n every 2 hours.
+    Fetches competitor prices for all 10 stores and sends alerts if needed.
+    """
+    logger.info("[RUN] Starting full price check for all stores...")
+    background_tasks.add_task(execute_full_check)
+    return {
+        "status": "started",
+        "message": "Price check triggered for all stores",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.post("/engine/run/{store_id}")
+async def run_single_store_check(store_id: int, background_tasks: BackgroundTasks):
+    """Run price check for a single store (manual trigger from dashboard)."""
+    logger.info(f"[RUN] Starting price check for store ID: {store_id}")
+    background_tasks.add_task(execute_store_check, store_id)
+    return {
+        "status": "started",
+        "store_id": store_id,
+        "message": f"Price check triggered for store {store_id}",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/engine/status")
+def get_engine_status():
+    """Get last run status and stats."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total_checks,
+                SUM(CASE WHEN status = 'alert' THEN 1 ELSE 0 END) as alerts_sent,
+                MAX(fetched_at) as last_run
+            FROM price_history
+            WHERE fetched_at > NOW() - INTERVAL '24 hours'
+        """)
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return {
+            "status": "ok",
+            "last_24h": {
+                "total_checks": row[0],
+                "alerts_sent": row[1],
+                "last_run": row[2].isoformat() if row[2] else None
+            }
+        }
+    except Exception as e:
+        logger.error(f"Status check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Core Execution Logic ──────────────────────────────────────
+async def execute_full_check():
+    """Main function: auto-discover stores → find competitors → compare prices → alert.
+    Runs all stores in parallel for speed.
+    """
+    # Step 0: Auto-discover new Short Trip stores from shorttrip.com
+    await _auto_discover_stores()
+
+    stores = await get_all_stores()
+    logger.info(f"[RUN] Processing {len(stores)} stores in parallel...")
+
+    # Run stores with concurrency limit (3 at a time → fast but no rate-limit)
+    tasks = [_checked_store(store['id']) for store in stores]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    success = sum(1 for r in results if not isinstance(r, Exception))
+    errors  = sum(1 for r in results if isinstance(r, Exception))
+    logger.info(f"[DONE] Full check complete. Success: {success}, Errors: {errors}")
+    return [r for r in results if not isinstance(r, Exception)]
+
+
+async def _checked_store(store_id: int):
+    """Wrap execute_store_check with semaphore to avoid OSM rate limits."""
+    async with _osm_semaphore:
+        return await execute_store_check(store_id)
+
+
+async def _auto_discover_stores():
+    """Scrape shorttrip.com for new store locations and add them to DB automatically."""
+    try:
+        from scraper import scrape_store_locations
+        from database import get_db_connection
+        import psycopg2.extras
+
+        logger.info("[DISCOVER] Checking shorttrip.com for new store locations...")
+        scraped = await scrape_store_locations()
+        if not scraped:
+            return
+
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        new_count = 0
+        for loc in scraped:
+            # Check if store already exists by address
+            cursor.execute(
+                "SELECT id FROM stores WHERE address ILIKE %s",
+                (f"%{loc.get('address', '')}%",)
+            )
+            if not cursor.fetchone() and loc.get('lat') and loc.get('lng'):
+                cursor.execute("""
+                    INSERT INTO stores (name, address, city, state, zip, lat, lng, active)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, true)
+                    ON CONFLICT DO NOTHING
+                """, (
+                    loc.get('name', 'Short Trip'),
+                    loc.get('address', ''),
+                    loc.get('city', ''),
+                    loc.get('state', 'SC'),
+                    loc.get('zip', ''),
+                    loc.get('lat'),
+                    loc.get('lng')
+                ))
+                if cursor.rowcount > 0:
+                    new_count += 1
+                    logger.info(f"  [NEW STORE] Added: {loc.get('name')} — {loc.get('address')}")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        if new_count:
+            logger.info(f"[DISCOVER] {new_count} new Short Trip stores added to DB!")
+        else:
+            logger.info("[DISCOVER] No new stores found.")
+    except Exception as e:
+        logger.warning(f"[DISCOVER] Store discovery skipped: {e}")
+
+
+async def _background_scheduler():
+    """
+    Runs automatically in background:
+    - First run: 45 seconds after startup (let services settle)
+    - Then: every 2 hours
+    This replaces the need for n8n cron triggers.
+    """
+    # Initial delay — let DB + all services start up
+    logger.info("[SCHED] Scheduler started. First run in 45 seconds...")
+    await asyncio.sleep(45)
+
+    while True:
+        try:
+            logger.info("[SCHED] Auto price check starting (all stores)...")
+            await execute_full_check()
+            logger.info("[SCHED] Auto price check complete. Next run in 2 hours.")
+        except Exception as e:
+            logger.error(f"[SCHED] Scheduler error: {e}")
+        # Wait 2 hours before next run
+        await asyncio.sleep(7200)
+
+async def execute_store_check(store_id: int):
+    """Full pipeline for a single store."""
+    try:
+        stores = await get_all_stores()
+        store = next((s for s in stores if s['id'] == store_id), None)
+        if not store:
+            raise ValueError(f"Store {store_id} not found")
+
+        logger.info(f"[STORE] Checking store: {store['name']}")
+
+        # Step 1: Find competitors nearby (OpenStreetMap — FREE)
+        competitors = await find_competitors_nearby(
+            lat=store['lat'],
+            lng=store['lng'],
+            radius_miles=SEARCH_RADIUS,
+            store_name=store.get('name')
+        )
+        logger.info(f"  Found {len(competitors)} competitors nearby")
+
+        # If 0 found at default radius, auto-retry with extended 5-mile radius
+        if len(competitors) == 0:
+            logger.info(f"  [RETRY] 0 found at {SEARCH_RADIUS}mi -- expanding to 5.0 miles...")
+            competitors = await find_competitors_nearby(
+                lat=store['lat'],
+                lng=store['lng'],
+                radius_miles=5.0,
+                store_name=store.get('name')
+            )
+            logger.info(f"  [RETRY] Found {len(competitors)} competitors at 5.0 miles")
+
+        # Step 1c: If STILL 0, load from DB cache (OSM may be rate-limited)
+        if len(competitors) == 0:
+            db_cached = await get_competitors_from_db(store_id)
+            if db_cached:
+                competitors = db_cached
+                logger.info(f"  [DB] Loaded {len(competitors)} competitors from DB cache (OSM unavailable)")
+
+        # Step 1b: Save/update competitors in DB (so dashboard can show them)
+        if competitors:
+            competitors = await upsert_competitors(store_id, competitors)
+            logger.info(f"  Saved {len(competitors)} competitors to DB")
+
+        # Step 2: Fetch regional price ONCE, then try TomTom per-station
+        our_price = float(store.get('our_price', 0) or 0)
+
+        # Fetch state/regional benchmark price once (avoids rate limiting)
+        regional_price_data = await fetch_gasbuddy_prices(
+            lat=float(store['lat']),
+            lng=float(store['lng']),
+            station_name=None
+        )
+        regional_price  = regional_price_data.get('price')
+        regional_source = regional_price_data.get('source', 'unknown')
+        if regional_price:
+            logger.info(f"  [PRICE] Regional benchmark: ${regional_price} via {regional_source}")
+
+        saved_count = 0
+        for comp in competitors:
+            try:
+                # Try TomTom for station-specific price (if API key is set)
+                from gasbuddy import TOMTOM_API_KEY, _fetch_from_tomtom
+                if TOMTOM_API_KEY:
+                    station_data = await _fetch_from_tomtom(
+                        float(comp['lat']), float(comp['lng']), comp['name']
+                    )
+                    if station_data.get('price'):
+                        comp['price']        = station_data['price']
+                        comp['price_source'] = 'tomtom'
+                    else:
+                        comp['price']        = regional_price
+                        comp['price_source'] = regional_source
+                else:
+                    # No TomTom key — use regional benchmark for all
+                    comp['price']        = regional_price
+                    comp['price_source'] = regional_source
+
+                # Save EACH competitor's price to price_history
+                if comp.get('price') and comp.get('db_id'):
+                    await save_competitor_price(
+                        comp_id=comp['db_id'],
+                        store_id=store_id,
+                        our_price=our_price,
+                        comp_price=comp['price'],
+                        source=comp['price_source']
+                    )
+                    saved_count += 1
+            except Exception as e:
+                logger.warning(f"  Price fetch failed for {comp.get('name', 'unknown')}: {e}")
+                comp['price']        = regional_price   # fallback to regional
+                comp['price_source'] = regional_source
+
+        logger.info(f"  [PRICE] Saved prices for {saved_count}/{len(competitors)} competitors")
+
+        # Step 3: Compare prices
+        comparison_result = await run_price_comparison(
+            store=store,
+            competitors=competitors
+        )
+
+        # Step 4: Save to DB
+        await save_price_history(store_id, comparison_result)
+
+        # Step 5: Send alert if needed
+        if comparison_result['action'] == 'alert':
+            await send_alert_notification(store, comparison_result)
+            await save_alert(store_id, comparison_result)
+
+        logger.info(f"  [OK] Store {store['name']}: {comparison_result['action'].upper()}")
+        return comparison_result
+
+    except Exception as e:
+        logger.error(f"[ERR] Error in store check {store_id}: {e}")
+        raise
+
+
+# ── Daily Summary Route ───────────────────────────────────────
+@app.post("/engine/daily-summary")
+async def trigger_daily_summary(background_tasks: BackgroundTasks):
+    """Send daily summary email. Called by node-cron at 8 AM EST."""
+    background_tasks.add_task(_send_daily_summary)
+    return {"status": "triggered", "timestamp": datetime.now().isoformat()}
+
+async def _send_daily_summary():
+    try:
+        stores = await get_all_stores()
+        results = []
+        for store in stores:
+            result = {"store_name": store.get("name"), "action": "skip"}
+            results.append(result)
+        summary_text = build_daily_summary(results)
+        await send_daily_summary_email(summary_text)
+        logger.info("[DONE] Daily summary email sent")
+    except Exception as e:
+        logger.error(f"Daily summary error: {e}")
+
+
+# ── Manual Notify Route ───────────────────────────────────────
+@app.post("/engine/notify")
+async def manual_notify(payload: dict):
+    """Manually trigger notification for an alert (from dashboard Notify button)."""
+    try:
+        store_id = payload.get("store_id")
+        message  = payload.get("message", "")
+        priority = payload.get("priority", "MED")
+        stores = await get_all_stores()
+        store = next((s for s in stores if s["id"] == store_id), {})
+        fake_comparison = {
+            "action": "alert",
+            "priority": priority,
+            "message": message,
+            "suppress_notification": False,
+            "our_price": store.get("our_price"),
+            "best_competitor": {"name": "Manual", "price": 0},
+            "price_diff": 0
+        }
+        result = await send_alert_notification(store, fake_comparison)
+        return {"status": "sent", "channels": result}
+    except Exception as e:
+        logger.error(f"Manual notify error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PYTHON_API_PORT", "8000"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

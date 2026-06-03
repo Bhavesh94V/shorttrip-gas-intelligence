@@ -1,0 +1,227 @@
+{
+  "name": "Short Trip Gas Price Intelligence",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "minutesInterval": 120
+            }
+          ]
+        }
+      },
+      "id": "cron-price-check",
+      "name": "Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [180, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/engine/run",
+        "options": {}
+      },
+      "id": "trigger-price-check",
+      "name": "Trigger Price Check (Python Engine)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 200]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-daily-summary",
+      "name": "Daily 8AM Summary",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [180, 400]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:8000/engine/daily-summary",
+        "options": {}
+      },
+      "id": "trigger-daily-summary",
+      "name": "Send Daily Email Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "shorttrip-price-check",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-alert",
+      "name": "Alert Webhook (from Python Engine)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [180, 620]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-action",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "alert",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-is-alert",
+      "name": "Is Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 620]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3001/api/alerts/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-internal-key",
+              "value": "stGI7f4D2a9B8c3E1f6D0a5B2c9E4f7D1a8B3c6E0f5D9a2B7c4E1f8D3a6B0c5E"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ store_id: $json.store_id, store_name: $json.store_name, our_price: $json.our_price, comp_price: $json.comp_price, comp_name: $json.comp_name, price_diff: $json.price_diff, priority: $json.priority || 'MED', message: $json.message, action: $json.action }) }}",
+        "options": {}
+      },
+      "id": "save-to-dashboard",
+      "name": "Save Alert to Dashboard DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 520]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"processed\", \"action\": $json.action, \"alert_saved\": true }"
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 620]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"skipped\", \"action\": $json.action }"
+      },
+      "id": "respond-webhook-skip",
+      "name": "Respond (Not Alert)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 740]
+    }
+  ],
+  "connections": {
+    "Every 2 Hours": {
+      "main": [
+        [
+          {
+            "node": "Trigger Price Check (Python Engine)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 8AM Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Email Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Webhook (from Python Engine)": {
+      "main": [
+        [
+          {
+            "node": "Is Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Alert?": {
+      "main": [
+        [
+          {
+            "node": "Save Alert to Dashboard DB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond (Not Alert)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Alert to Dashboard DB": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "tags": ["shorttrip", "garudx", "gas-price"],
+  "pinData": {}
+}

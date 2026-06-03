@@ -1,0 +1,19 @@
+[build]
+  base    = "."
+  command = "npm run build"
+  publish = "dist"
+
+# ── API Proxy → Render (avoids CORS + env var issues) ──────────
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://shorttrip-node-api.onrender.com/api/:splat"
+  status = 200
+  force  = true
+  [redirects.headers]
+    X-Forwarded-Host = "shorttrip-gas-intelligence.netlify.app"
+
+# ── SPA fallback (React Router) ────────────────────────────────
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

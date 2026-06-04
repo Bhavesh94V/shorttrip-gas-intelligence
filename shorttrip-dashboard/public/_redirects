@@ -1,0 +1,8 @@
+# Short Trip — Netlify Redirects
+# Format: from  to  status  [conditions]
+
+# 1. API Proxy → Render backend (MUST be first)
+/api/*  https://shorttrip-node-api.onrender.com/api/:splat  200
+
+# 2. React Router SPA fallback (refresh fix)
+/*  /index.html  200

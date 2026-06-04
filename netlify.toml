@@ -1,0 +1,20 @@
+# Short Trip Gas Intelligence — Netlify Config
+# Root-level config (Netlify reads this first)
+
+[build]
+  base    = "shorttrip-dashboard"
+  command = "npm run build"
+  publish = "shorttrip-dashboard/dist"
+
+# ── API Proxy → Render backend ──────────────────────────────────
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://shorttrip-node-api.onrender.com/api/:splat"
+  status = 200
+  force  = true
+
+# ── React Router SPA fallback (fixes page refresh 404) ─────────
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

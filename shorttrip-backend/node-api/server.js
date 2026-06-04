@@ -19,12 +19,12 @@ const PYTHON_API = process.env.PYTHON_API_URL || 'http://localhost:8000';
 const CHECK_FREQUENCY = parseInt(process.env.CHECK_FREQUENCY_HOURS || '2');
 
 // ── Routes ────────────────────────────────────────────────────
-const storesRouter   = require('./routes/stores');
-const pricesRouter   = require('./routes/prices');
-const alertsRouter   = require('./routes/alerts');
-const workersRouter  = require('./routes/workers');
+const storesRouter = require('./routes/stores');
+const pricesRouter = require('./routes/prices');
+const alertsRouter = require('./routes/alerts');
+const workersRouter = require('./routes/workers');
 const settingsRouter = require('./routes/settings');
-const authRouter     = require('./routes/auth');
+const authRouter = require('./routes/auth');
 
 // ── Middleware ────────────────────────────────────────────────
 app.use(helmet());
@@ -32,7 +32,8 @@ app.use(cors({
   origin: [
     'http://localhost:5173',   // Vite dev server
     'http://localhost:4173',   // Vite preview
-    'https://shorttrip-admin.garudx.ai'
+    'https://shorttrip-admin.garudx.ai',
+    'https://shorttrip-gas-intelligence.netlify.app'
   ],
   credentials: true
 }));
@@ -50,11 +51,11 @@ const limiter = rateLimit({
 app.use('/api', limiter);
 
 // ── API Routes ────────────────────────────────────────────────
-app.use('/api/auth',     authRouter);
-app.use('/api/stores',   storesRouter);
-app.use('/api/prices',   pricesRouter);
-app.use('/api/alerts',   alertsRouter);
-app.use('/api/workers',  workersRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/stores', storesRouter);
+app.use('/api/prices', pricesRouter);
+app.use('/api/alerts', alertsRouter);
+app.use('/api/workers', workersRouter);
 app.use('/api/settings', settingsRouter);
 
 // ── Health Check ──────────────────────────────────────────────

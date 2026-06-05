@@ -1,0 +1,21 @@
+app = "shorttrip-n8n"
+primary_region = "sin"
+
+[build]
+  image = "n8nio/n8n"
+
+[http_service]
+  internal_port = 5678
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "n8n_data"
+  destination = "/home/node/.n8n"

@@ -365,10 +365,44 @@ async def trigger_daily_summary(background_tasks: BackgroundTasks):
 async def _send_daily_summary():
     try:
         stores = await get_all_stores()
+        conn = await get_db_connection()
         results = []
+
         for store in stores:
-            result = {"store_name": store.get("name"), "action": "skip"}
-            results.append(result)
+            try:
+                # Get latest price check for this store
+                row = await conn.fetchrow("""
+                    SELECT ph.our_price, ph.comp_price, ph.price_diff, ph.status, ph.source,
+                           c.name AS comp_name, ph.fetched_at
+                    FROM price_history ph
+                    LEFT JOIN competitors c ON c.id = ph.comp_id
+                    WHERE ph.store_id = $1
+                    ORDER BY ph.fetched_at DESC LIMIT 1
+                """, store['id'])
+
+                # Get today's alert count
+                alert_count = await conn.fetchval("""
+                    SELECT COUNT(*) FROM alerts
+                    WHERE store_id = $1 AND DATE(created_at) = CURRENT_DATE
+                """, store['id'])
+
+                result = {
+                    "store_name": store.get("name"),
+                    "store_id": store.get("id"),
+                    "our_price": float(row['our_price']) if row and row['our_price'] else None,
+                    "best_competitor": row['comp_name'] if row else None,
+                    "comp_price": float(row['comp_price']) if row and row['comp_price'] else None,
+                    "price_diff": float(row['price_diff']) if row and row['price_diff'] else None,
+                    "action": row['status'] if row else "skip",
+                    "source": row['source'] if row else None,
+                    "today_alerts": alert_count or 0,
+                }
+                results.append(result)
+            except Exception as e:
+                logger.warning(f"  Daily summary — error for store {store.get('name')}: {e}")
+                results.append({"store_name": store.get("name"), "action": "error"})
+
+        await conn.close()
         summary_text = build_daily_summary(results)
         await send_daily_summary_email(summary_text)
         logger.info("[DONE] Daily summary email sent")

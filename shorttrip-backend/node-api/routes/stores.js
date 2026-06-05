@@ -1,8 +1,12 @@
 /**
  * Stores Routes
- * GET    /api/stores              — All 10 stores with latest price data
- * GET    /api/stores/:id          — Single store with competitor list
- * PATCH  /api/stores/:id/price    — Update our current gas price (manual)
+ * GET    /api/stores                   — All 10 stores with latest price data
+ * GET    /api/stores/export/csv        — Download price history as CSV  ← MUST be before /:id
+ * GET    /api/stores/export/summary    — JSON summary for reports       ← MUST be before /:id
+ * GET    /api/stores/:id               — Single store with competitor list
+ * PATCH  /api/stores/:id/price         — Update regular gas price
+ * PATCH  /api/stores/:id/prices        — Update multi-fuel prices
+ * POST   /api/stores/:id/trigger       — Manual price check trigger
  */
 const router = require('express').Router();
 const pool = require('../db');
@@ -47,6 +51,89 @@ router.get('/', auth, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── IMPORTANT: Static routes MUST come before /:id wildcard ──────────
+
+// GET /api/stores/export/csv — Download all price history as CSV
+router.get('/export/csv', auth, async (req, res) => {
+  try {
+    const { days = 7, store_id } = req.query;
+    const params = [parseInt(days)];
+    const storeFilter = store_id ? `AND ph.store_id = $2` : '';
+    if (store_id) params.push(parseInt(store_id));
+
+    const result = await pool.query(`
+      SELECT
+        s.name        AS store_name,
+        s.address     AS store_address,
+        s.our_price,
+        c.name        AS competitor_name,
+        c.distance_mi,
+        ph.comp_price,
+        ph.price_diff,
+        ph.status,
+        ph.source,
+        ph.fetched_at
+      FROM price_history ph
+      JOIN stores s ON s.id = ph.store_id
+      LEFT JOIN competitors c ON c.id = ph.comp_id
+      WHERE ph.fetched_at > NOW() - make_interval(days => $1)
+      ${storeFilter}
+      ORDER BY ph.fetched_at DESC
+      LIMIT 5000
+    `, params);
+
+    const headers = ['Store Name','Address','Our Price','Competitor','Distance (mi)','Comp Price','Difference','Status','Source','Date/Time'];
+    const rows = result.rows.map(r => [
+      `"${r.store_name}"`, `"${r.store_address || ''}"`,
+      r.our_price || '', `"${r.competitor_name || ''}"`,
+      r.distance_mi || '', r.comp_price || '', r.price_diff || '',
+      r.status || '', r.source || '',
+      r.fetched_at ? new Date(r.fetched_at).toISOString() : ''
+    ].join(','));
+
+    const csv = [headers.join(','), ...rows].join('\n');
+    const filename = `shorttrip_prices_${new Date().toISOString().slice(0,10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    console.error('GET /stores/export/csv error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/stores/export/summary — JSON summary for report/print view
+router.get('/export/summary', auth, async (req, res) => {
+  try {
+    const storesResult = await pool.query(`
+      SELECT s.id, s.name, s.address, s.our_price,
+        ph.comp_price, ph.price_diff, ph.status,
+        c.name AS best_comp,
+        (SELECT COUNT(*) FROM alerts a WHERE a.store_id = s.id AND DATE(a.created_at) = CURRENT_DATE) AS today_alerts,
+        (SELECT COUNT(*) FROM alerts a WHERE a.store_id = s.id AND a.acknowledged = false) AS unread_alerts
+      FROM stores s
+      LEFT JOIN LATERAL (
+        SELECT * FROM price_history WHERE store_id = s.id ORDER BY fetched_at DESC LIMIT 1
+      ) ph ON true
+      LEFT JOIN competitors c ON c.id = ph.comp_id
+      WHERE s.active = true ORDER BY s.id
+    `);
+    const totals = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE acknowledged = false) AS total_alerts,
+        COUNT(*) FILTER (WHERE DATE(created_at) = CURRENT_DATE) AS today_alerts,
+        ROUND(AVG(price_diff)::numeric, 3) AS avg_diff
+      FROM alerts
+    `);
+    res.json({ generated_at: new Date().toISOString(), stores: storesResult.rows, totals: totals.rows[0] });
+  } catch (err) {
+    console.error('GET /stores/export/summary error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────
 
 // GET /api/stores/:id — Single store detail with all competitors
 router.get('/:id', auth, async (req, res) => {
@@ -184,98 +271,4 @@ router.patch('/:id/prices', auth, async (req, res) => {
   }
 });
 
-// GET /api/stores/export/csv — Download all price history as CSV
-router.get('/export/csv', auth, async (req, res) => {
-  try {
-    const { days = 7, store_id } = req.query;
-    const params = [parseInt(days)];
-    const storeFilter = store_id ? `AND ph.store_id = $2` : '';
-    if (store_id) params.push(parseInt(store_id));
-
-    const result = await pool.query(`
-      SELECT
-        s.name        AS store_name,
-        s.address     AS store_address,
-        s.our_price,
-        c.name        AS competitor_name,
-        c.distance_mi,
-        ph.comp_price,
-        ph.price_diff,
-        ph.status,
-        ph.source,
-        ph.fetched_at
-      FROM price_history ph
-      JOIN stores s ON s.id = ph.store_id
-      LEFT JOIN competitors c ON c.id = ph.comp_id
-      WHERE ph.fetched_at > NOW() - make_interval(days => $1)
-      ${storeFilter}
-      ORDER BY ph.fetched_at DESC
-      LIMIT 5000
-    `, params);
-
-    // Build CSV
-    const headers = ['Store Name','Address','Our Price','Competitor','Distance (mi)','Comp Price','Difference','Status','Source','Date/Time'];
-    const rows = result.rows.map(r => [
-      `"${r.store_name}"`,
-      `"${r.store_address || ''}"`,
-      r.our_price || '',
-      `"${r.competitor_name || ''}"`,
-      r.distance_mi || '',
-      r.comp_price || '',
-      r.price_diff || '',
-      r.status || '',
-      r.source || '',
-      r.fetched_at ? new Date(r.fetched_at).toISOString() : ''
-    ].join(','));
-
-    const csv = [headers.join(','), ...rows].join('\n');
-    const filename = `shorttrip_prices_${new Date().toISOString().slice(0,10)}.csv`;
-
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(csv);
-  } catch (err) {
-    console.error('GET /stores/export/csv error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /api/stores/export/summary — JSON summary for report/print view
-router.get('/export/summary', auth, async (req, res) => {
-  try {
-    const storesResult = await pool.query(`
-      SELECT
-        s.id, s.name, s.address, s.our_price,
-        ph.comp_price, ph.price_diff, ph.status,
-        c.name AS best_comp,
-        (SELECT COUNT(*) FROM alerts a WHERE a.store_id = s.id AND DATE(a.created_at) = CURRENT_DATE) AS today_alerts,
-        (SELECT COUNT(*) FROM alerts a WHERE a.store_id = s.id AND a.acknowledged = false) AS unread_alerts
-      FROM stores s
-      LEFT JOIN LATERAL (
-        SELECT * FROM price_history WHERE store_id = s.id ORDER BY fetched_at DESC LIMIT 1
-      ) ph ON true
-      LEFT JOIN competitors c ON c.id = ph.comp_id
-      WHERE s.active = true ORDER BY s.id
-    `);
-
-    const totals = await pool.query(`
-      SELECT
-        COUNT(*) FILTER (WHERE acknowledged = false) AS total_alerts,
-        COUNT(*) FILTER (WHERE DATE(created_at) = CURRENT_DATE) AS today_alerts,
-        ROUND(AVG(price_diff)::numeric, 3) AS avg_diff
-      FROM alerts
-    `);
-
-    res.json({
-      generated_at: new Date().toISOString(),
-      stores: storesResult.rows,
-      totals: totals.rows[0]
-    });
-  } catch (err) {
-    console.error('GET /stores/export/summary error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;
-

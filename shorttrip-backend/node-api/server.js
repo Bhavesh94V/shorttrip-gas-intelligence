@@ -100,10 +100,74 @@ app.post('/api/alerts/internal', async (req, res) => {
   }
 });
 
+// ── Engine Proxy Routes → Python Engine ───────────────────────
+// These forward requests from the dashboard to the Python Engine.
+// Without these, /api/engine/* returns 404.
+
+const auth = require('./middleware/auth');
+
+// POST /api/engine/run — Trigger full price check for all stores
+app.post('/api/engine/run', auth, async (req, res) => {
+  try {
+    console.log('[ENGINE] Triggering full price check...');
+    const resp = await axios.post(`${PYTHON_API}/engine/run`, {}, { timeout: 60000 });
+    res.json(resp.data);
+  } catch (err) {
+    console.error('[ENGINE] /engine/run failed:', err.message);
+    res.status(502).json({ error: 'Python Engine unreachable', detail: err.message });
+  }
+});
+
+// POST /api/engine/run/:id — Trigger price check for single store
+app.post('/api/engine/run/:id', auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`[ENGINE] Triggering price check for store ${id}...`);
+    const resp = await axios.post(`${PYTHON_API}/engine/run/${id}`, {}, { timeout: 30000 });
+    res.json(resp.data);
+  } catch (err) {
+    console.error(`[ENGINE] /engine/run/${req.params.id} failed:`, err.message);
+    res.status(502).json({ error: 'Python Engine unreachable', detail: err.message });
+  }
+});
+
+// POST /api/engine/notify — Trigger SMS/WhatsApp notification for an alert
+app.post('/api/engine/notify', auth, async (req, res) => {
+  try {
+    const resp = await axios.post(`${PYTHON_API}/engine/notify`, req.body, { timeout: 15000 });
+    res.json(resp.data);
+  } catch (err) {
+    console.error('[ENGINE] /engine/notify failed:', err.message);
+    res.status(502).json({ error: 'Notification engine unreachable', detail: err.message });
+  }
+});
+
+// POST /api/engine/daily-summary — Trigger daily summary email
+app.post('/api/engine/daily-summary', auth, async (req, res) => {
+  try {
+    const resp = await axios.post(`${PYTHON_API}/engine/daily-summary`, {}, { timeout: 30000 });
+    res.json(resp.data);
+  } catch (err) {
+    console.error('[ENGINE] /engine/daily-summary failed:', err.message);
+    res.status(502).json({ error: 'Engine daily-summary failed', detail: err.message });
+  }
+});
+
+// GET /api/engine/status — Check if Python Engine is online
+app.get('/api/engine/status', async (req, res) => {
+  try {
+    const resp = await axios.get(`${PYTHON_API}/health`, { timeout: 5000 });
+    res.json({ python_engine: 'online', url: PYTHON_API, ...resp.data });
+  } catch (err) {
+    res.json({ python_engine: 'offline', url: PYTHON_API, error: err.message });
+  }
+});
+
 // ── 404 Handler ───────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found', path: req.path });
 });
+
 
 // ── Error Handler ─────────────────────────────────────────────
 app.use((err, req, res, next) => {

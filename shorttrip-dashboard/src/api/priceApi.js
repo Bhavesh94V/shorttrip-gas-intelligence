@@ -47,9 +47,10 @@ export const triggerStoreCheck = (id) =>
   api.post(`/stores/${id}/trigger`).then(r => r.data)
 
 export const triggerAllStoresCheck = () =>
-  api.post('/engine/run').then(r => r.data).catch(() =>
-    fetch('/api/health').then(() => ({ status: 'triggered' }))
-  )
+  api.post('/engine/run').then(r => r.data)
+
+export const fetchEngineStatus = () =>
+  api.get('/engine/status').then(r => r.data).catch(() => ({ python_engine: 'offline' }))
 
 // ── Prices ────────────────────────────────────────────────────
 export const fetchLatestPrices = () =>

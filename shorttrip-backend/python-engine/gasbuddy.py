@@ -4,10 +4,11 @@ Gas Price Fetcher — Multi-Source with Automatic Fallbacks
 GarudX.AI | June 2026
 
 Price Sources (in order of priority):
+  0. GasBuddy GraphQL Direct (custom iOS-app mimicry — per-station real prices)
   1. GasBuddy (py-gasbuddy library — unofficial GraphQL)
-  2. Waze Live Map (crowdsourced, free)
-  3. AAA Daily Fuel Gauge Report (free, US govt-level accuracy)
-  4. MyGasFeed (if available)
+  2. TomTom POI Search (station-specific, free 2,500/day)
+  3. Waze Live Map (crowdsourced, free)
+  4. AAA Daily Fuel Gauge Report (free, US govt-level accuracy)
   5. EIA.gov (official US gov weekly average — ALWAYS works)
 
 All sources are FREE. No paid API keys required.
@@ -47,6 +48,47 @@ TOMTOM_SEARCH_URL = "https://api.tomtom.com/search/2/nearbySearch/.json"
 _eia_cache: dict = {"price": None, "fetched_at": None}
 _EIA_CACHE_TTL_HOURS = 3   # refresh every 3 hours
 
+# ── GasBuddy GraphQL Cache (station-level, 30 min TTL) ──────────
+_gb_cache: dict = {}          # key: "lat,lng" → {price, fetched_at}
+_GB_CACHE_TTL_MINUTES = 30
+
+# GasBuddy GraphQL endpoint + headers (mimics iOS GasBuddy 7.2.0 app)
+_GB_GRAPHQL_URL = "https://www.gasbuddy.com/graphql"
+_GB_HEADERS = {
+    "User-Agent":                    "GasBuddyApp/7.2.0 CFNetwork/1494.0.7 Darwin/23.4.0",
+    "apollographql-client-name":     "com.gasbuddy.app",
+    "apollographql-client-version":  "7.2.0",
+    "Accept":                        "application/json",
+    "Content-Type":                  "application/json",
+    "Accept-Language":               "en-US,en;q=0.9",
+}
+_GB_QUERY = """
+query LocationBySearchTerm($lat: Float, $lng: Float, $search: String) {
+  locationBySearchTerm(lat: $lat, lng: $lng, search: $search) {
+    stations {
+      results {
+        id
+        name
+        latitude
+        longitude
+        prices {
+          credit {
+            nickname
+            postedTime
+            price
+          }
+          cash {
+            nickname
+            postedTime
+            price
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 
 # ══════════════════════════════════════════════════════════════════
 # PUBLIC API
@@ -68,7 +110,15 @@ async def fetch_gasbuddy_prices(
     lat = float(lat)
     lng = float(lng)
 
-    # 0 — TomTom Fuel Prices (station-specific prices, free 2,500/day)
+    # 0 — GasBuddy GraphQL Direct (custom iOS-app mimicry — per-station real prices)
+    result = await _try(
+        _fetch_from_gasbuddy_graphql(lat, lng, station_name),
+        "GasBuddy-GraphQL"
+    )
+    if result:
+        return result
+
+    # 1 — TomTom Fuel Prices (station-specific prices, free 2,500/day)
     if TOMTOM_API_KEY:
         result = await _try(
             _fetch_from_tomtom(lat, lng, station_name),
@@ -77,7 +127,7 @@ async def fetch_gasbuddy_prices(
         if result:
             return result
 
-    # 1 — py-gasbuddy (unofficial GraphQL)
+    # 2 — py-gasbuddy (unofficial GraphQL)
     if GASBUDDY_AVAILABLE:
         result = await _try(
             _fetch_from_gasbuddy(lat, lng, zip_code),
@@ -86,17 +136,17 @@ async def fetch_gasbuddy_prices(
         if result:
             return result
 
-    # 2 — Waze crowdsourced prices
+    # 3 — Waze crowdsourced prices
     result = await _try(_fetch_from_waze(lat, lng), "Waze")
     if result:
         return result
 
-    # 3 — AAA Daily Fuel Gauge (free, reliable state-level data)
+    # 4 — AAA Daily Fuel Gauge (free, reliable state-level data)
     result = await _try(_fetch_from_aaa(), "AAA")
     if result:
         return result
 
-    # 4 — EIA.gov official government data (cached)
+    # 5 — EIA.gov official government data (cached) — ALWAYS works
     result = await _try(_fetch_from_eia(), "EIA.gov")
     if result:
         return result
@@ -130,6 +180,111 @@ async def batch_fetch_prices(competitors: list) -> list:
 # ══════════════════════════════════════════════════════════════════
 # PRICE SOURCES
 # ══════════════════════════════════════════════════════════════════
+
+async def _fetch_from_gasbuddy_graphql(
+    lat: float, lng: float, station_name: str = None
+) -> dict:
+    """
+    Custom GasBuddy GraphQL scraper — mimics iOS GasBuddy 7.2.0 app.
+    Returns per-station real crowdsourced prices.
+    Falls back gracefully if blocked (returns {}).
+    """
+    # Check cache first
+    cache_key = f"{lat:.4f},{lng:.4f}"
+    if cache_key in _gb_cache:
+        cached = _gb_cache[cache_key]
+        age = datetime.now() - cached["fetched_at"]
+        if age < timedelta(minutes=_GB_CACHE_TTL_MINUTES):
+            logger.debug(f"  [GB-GQL] Cache hit for {cache_key}")
+            return cached["data"]
+
+    payload = {
+        "operationName": "LocationBySearchTerm",
+        "variables": {
+            "lat": lat,
+            "lng": lng,
+            "search": station_name or ""
+        },
+        "query": _GB_QUERY
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+            resp = await client.post(
+                _GB_GRAPHQL_URL,
+                json=payload,
+                headers=_GB_HEADERS
+            )
+
+            if resp.status_code != 200:
+                logger.debug(f"  [GB-GQL] HTTP {resp.status_code} — blocked or unavailable")
+                return {}
+
+            data = resp.json()
+
+            # Navigate GraphQL response
+            stations_data = (
+                data.get("data", {})
+                    .get("locationBySearchTerm", {})
+                    .get("stations", {})
+                    .get("results", [])
+            )
+
+            if not stations_data:
+                logger.debug("  [GB-GQL] No stations in response")
+                return {}
+
+            # Find closest station with a valid price
+            import math
+            def _dist(s):
+                slat = s.get("latitude") or lat
+                slng = s.get("longitude") or lng
+                return math.sqrt((slat - lat)**2 + (slng - lng)**2)
+
+            stations_sorted = sorted(stations_data, key=_dist)
+
+            for station in stations_sorted[:5]:  # Try top 5 nearest
+                prices = station.get("prices", {})
+                # Prefer credit price, fallback to cash
+                price_obj = prices.get("credit") or prices.get("cash")
+                if not price_obj:
+                    continue
+                price_val = price_obj.get("price")
+                if not price_val:
+                    continue
+                try:
+                    price_float = float(price_val)
+                except (TypeError, ValueError):
+                    continue
+                if not (2.0 < price_float < 8.0):  # Sanity check
+                    continue
+
+                result = {
+                    "price":        price_float,
+                    "source":       "gasbuddy_graphql",
+                    "station_name": station.get("name", "Unknown"),
+                    "station_id":   station.get("id", ""),
+                    "fuel_type":    "regular",
+                    "posted_by":    price_obj.get("nickname", "anonymous"),
+                    "posted_time":  price_obj.get("postedTime", ""),
+                    "last_updated": datetime.now().isoformat()
+                }
+
+                # Cache the result
+                _gb_cache[cache_key] = {
+                    "data": result,
+                    "fetched_at": datetime.now()
+                }
+                logger.info(
+                    f"  [GB-GQL] ✅ Real price: ${price_float} "
+                    f"@ {station.get('name', '?')} (posted: {price_obj.get('postedTime', '?')})"
+                )
+                return result
+
+    except Exception as e:
+        logger.debug(f"  [GB-GQL] Exception: {e}")
+
+    return {}
 
 async def _fetch_from_tomtom(lat: float, lng: float, station_name: Optional[str] = None) -> dict:
     """

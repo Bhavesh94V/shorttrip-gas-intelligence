@@ -23,5 +23,5 @@ python-dotenv>=1.0.0
 pydantic>=2.0.0
 
 # Email (built-in smtplib used — no extra package needed)
-# WhatsApp & Twilio (install only when keys are ready)
-# twilio>=8.0.0         # Uncomment when Twilio configured
+# WhatsApp & Twilio
+twilio>=8.0.0

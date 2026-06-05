@@ -64,10 +64,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS — allow Node.js API to call this
+# CORS — allow Node.js API + Dashboard to call this
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "https://shorttrip-api.garudx.ai"],
+    allow_origins=[
+        "http://localhost:3001",
+        "http://localhost:5173",
+        "http://localhost:4173",
+        "https://shorttrip-node-api.onrender.com",
+        "https://shorttrip-python-engine.onrender.com",
+        "https://shorttrip-gas-intelligence.netlify.app",
+        "https://shorttrip-admin.garudx.ai",
+        "https://shorttrip-api.garudx.ai",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,7 +133,8 @@ def get_engine_status():
             SELECT
                 COUNT(*) as total_checks,
                 SUM(CASE WHEN status = 'alert' THEN 1 ELSE 0 END) as alerts_sent,
-                MAX(fetched_at) as last_run
+                MAX(fetched_at) as last_run,
+                (SELECT source FROM price_history ORDER BY fetched_at DESC LIMIT 1) as last_source
             FROM price_history
             WHERE fetched_at > NOW() - INTERVAL '24 hours'
         """)
@@ -136,12 +146,65 @@ def get_engine_status():
             "last_24h": {
                 "total_checks": row[0],
                 "alerts_sent": row[1],
-                "last_run": row[2].isoformat() if row[2] else None
+                "last_run": row[2].isoformat() if row[2] else None,
+                "last_price_source": row[3]
             }
         }
     except Exception as e:
         logger.error(f"Status check error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/engine/test-sources")
+async def test_price_sources():
+    """
+    Test all price sources against a real SC location (Store 1 — Ridgeville).
+    Call this to debug why prices are not updating.
+    Returns which sources work and which fail.
+    """
+    # Store 1: 614 US-78, Ridgeville, SC — real coordinates
+    test_lat, test_lng = 33.0971, -80.3231
+
+    results = {}
+    import asyncio
+
+    # Test each source independently
+    async def test_source(name, coro):
+        try:
+            result = await asyncio.wait_for(coro, timeout=15)
+            return {"status": "ok", "price": result.get("price"), "source": result.get("source")}
+        except asyncio.TimeoutError:
+            return {"status": "timeout"}
+        except Exception as e:
+            return {"status": "error", "detail": str(e)[:100]}
+
+    from gasbuddy import (
+        _fetch_from_tomtom, _fetch_from_gasbuddy, _fetch_from_waze,
+        _fetch_from_aaa, _fetch_from_eia, TOMTOM_API_KEY, GASBUDDY_AVAILABLE, EIA_API_KEY
+    )
+
+    results["tomtom"]  = {"api_key_set": bool(TOMTOM_API_KEY)}
+    if TOMTOM_API_KEY:
+        results["tomtom"].update(await test_source("tomtom", _fetch_from_tomtom(test_lat, test_lng, "Shell")))
+
+    results["gasbuddy"] = {"library_available": GASBUDDY_AVAILABLE}
+    if GASBUDDY_AVAILABLE:
+        results["gasbuddy"].update(await test_source("gasbuddy", _fetch_from_gasbuddy(test_lat, test_lng)))
+
+    results["waze"]  = await test_source("waze",  _fetch_from_waze(test_lat, test_lng))
+    results["aaa"]   = await test_source("aaa",   _fetch_from_aaa())
+    results["eia"]   = await test_source("eia",   _fetch_from_eia())
+    results["eia"]["api_key_set"] = bool(EIA_API_KEY)
+
+    # Summary
+    working = [k for k, v in results.items() if v.get("status") == "ok" and v.get("price")]
+    results["summary"] = {
+        "working_sources": working,
+        "any_working": len(working) > 0,
+        "recommendation": "Set EIA_API_KEY env var on Render for guaranteed prices" if not working else f"Use {working[0]} as primary source"
+    }
+    return results
+
 
 # ── Core Execution Logic ──────────────────────────────────────
 async def execute_full_check():

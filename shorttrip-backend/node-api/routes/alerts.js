@@ -45,15 +45,15 @@ router.post('/internal', async (req, res) => {
     }
 
     // Dedup — skip if same alert within last N hours
-    const dedupHours = parseInt(process.env.DEDUP_HOURS || '4');
+    const dedupHours = Math.max(1, Math.min(72, parseInt(process.env.DEDUP_HOURS || '4')));
     const existing = await pool.query(`
       SELECT id FROM alerts
       WHERE store_id = $1
         AND comp_name = $2
         AND acknowledged = false
-        AND created_at > NOW() - INTERVAL '${dedupHours} hours'
+        AND created_at > NOW() - make_interval(hours => $3)
       LIMIT 1
-    `, [store_id, comp_name || '']);
+    `, [store_id, comp_name || '', dedupHours]);
 
     if (existing.rows.length > 0) {
       return res.json({ status: 'deduped', alert_id: existing.rows[0].id });

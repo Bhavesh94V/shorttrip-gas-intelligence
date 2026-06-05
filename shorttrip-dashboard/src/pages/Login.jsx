@@ -81,6 +81,7 @@ export default function Login() {
               onChange={e => setEmail(e.target.value)}
               className="input"
               placeholder="manager@shorttrip.com"
+              autoComplete="email"
               required
             />
           </div>
@@ -97,6 +98,7 @@ export default function Login() {
                 onChange={e => setPassword(e.target.value)}
                 className="input pr-10"
                 placeholder="Enter your password"
+                autoComplete="current-password"
                 required
               />
               <button
@@ -130,7 +132,8 @@ export default function Login() {
           </button>
         </form>
 
-        {/* Dev Login */}
+        {/* Dev Login — only visible in development mode */}
+        {import.meta.env.DEV && (
         <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border)' }}>
           <button
             onClick={devLogin}
@@ -140,6 +143,7 @@ export default function Login() {
             🛠 Dev Mode — Skip Login
           </button>
         </div>
+        )}
 
         <p className="text-center text-xs mt-4" style={{ color: 'var(--color-text-3)' }}>
           GarudX.AI © 2026

@@ -39,6 +39,8 @@ router.get('/latest', auth, async (req, res) => {
 router.get('/history', auth, async (req, res) => {
   try {
     const { store_id, days = 7, limit = 200 } = req.query;
+    const safeDays = Math.max(1, Math.min(365, parseInt(days) || 7));
+    const safeLimit = Math.max(1, Math.min(1000, parseInt(limit) || 200));
     let query = `
       SELECT
         ph.id, ph.store_id, ph.our_price, ph.comp_price,
@@ -48,14 +50,16 @@ router.get('/history', auth, async (req, res) => {
       FROM price_history ph
       JOIN stores s ON s.id = ph.store_id
       LEFT JOIN competitors c ON c.id = ph.comp_id
-      WHERE ph.fetched_at > NOW() - INTERVAL '${parseInt(days)} days'
+      WHERE ph.fetched_at > NOW() - make_interval(days => $1)
     `;
-    const params = [];
+    const params = [safeDays];
+    let idx = 2;
     if (store_id) {
-      query += ` AND ph.store_id = $1`;
+      query += ` AND ph.store_id = $${idx++}`;
       params.push(parseInt(store_id));
     }
-    query += ` ORDER BY ph.fetched_at DESC LIMIT ${parseInt(limit)}`;
+    query += ` ORDER BY ph.fetched_at DESC LIMIT $${idx}`;
+    params.push(safeLimit);
     const result = await pool.query(query, params);
     res.json({ history: result.rows, count: result.rows.length });
   } catch (err) {
@@ -67,7 +71,12 @@ router.get('/history', auth, async (req, res) => {
 router.get('/chart', auth, async (req, res) => {
   try {
     const { store_id } = req.query;
-    let whereExtra = store_id ? `AND ph.store_id = ${parseInt(store_id)}` : '';
+    const params = [];
+    let storeFilter = '';
+    if (store_id) {
+      params.push(parseInt(store_id));
+      storeFilter = `AND ph.store_id = $${params.length}`;
+    }
 
     const result = await pool.query(`
       SELECT
@@ -80,10 +89,10 @@ router.get('/chart', auth, async (req, res) => {
       JOIN stores s ON s.id = ph.store_id
       WHERE ph.fetched_at > NOW() - INTERVAL '7 days'
         AND ph.our_price IS NOT NULL
-        ${whereExtra}
+        ${storeFilter}
       GROUP BY ph.store_id, s.name, DATE(ph.fetched_at)
       ORDER BY date ASC, ph.store_id
-    `);
+    `, params);
 
     // Group by store for chart series
     const series = {};

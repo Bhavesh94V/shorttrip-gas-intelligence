@@ -14,7 +14,7 @@ const cron = require('node-cron');
 const axios = require('axios');
 
 const app = express();
-const PORT = process.env.NODE_PORT || 3001;
+const PORT = process.env.PORT || process.env.NODE_PORT || 3001;
 const PYTHON_API = process.env.PYTHON_API_URL || 'http://localhost:8000';
 const CHECK_FREQUENCY = parseInt(process.env.CHECK_FREQUENCY_HOURS || '2');
 
@@ -33,7 +33,9 @@ app.use(cors({
     'http://localhost:5173',   // Vite dev server
     'http://localhost:4173',   // Vite preview
     'https://shorttrip-admin.garudx.ai',
-    'https://shorttrip-gas-intelligence.netlify.app'
+    'https://shorttrip-gas-intelligence.netlify.app',
+    'https://shorttrip-node-api.onrender.com',
+    'https://shorttrip-python-engine.onrender.com'
   ],
   credentials: true
 }));

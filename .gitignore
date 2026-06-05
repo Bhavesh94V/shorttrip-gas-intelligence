@@ -1,4 +1,6 @@
-# ── Environment Variables ────────────────────────────────────
+# ── Environment Variables (NEVER commit — contains secrets) ──
+**/.env
+**/.env.*
 .env
 .env.local
 .env.production

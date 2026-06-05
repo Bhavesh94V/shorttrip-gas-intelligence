@@ -10,6 +10,7 @@ import Workers from './pages/Workers'
 import Settings from './pages/Settings'
 import AllStores from './pages/AllStores'
 import MapView from './pages/MapView'
+import ErrorBoundary from './components/ErrorBoundary'
 
 // ── Auth Context ──────────────────────────────────────────────
 export const AuthContext = createContext(null)
@@ -61,6 +62,7 @@ export default function App() {
   return (
     <ThemeContext.Provider value={{ dark, toggleTheme }}>
       <AuthContext.Provider value={{ token, user, login, logout }}>
+        <ErrorBoundary>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Login />} />
@@ -80,6 +82,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </BrowserRouter>
+        </ErrorBoundary>
       </AuthContext.Provider>
     </ThemeContext.Provider>
   )

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { Save, CheckCircle, Settings as SettingsIcon, Bell, Shield, Database, Clock } from 'lucide-react'
+import { Save, CheckCircle, Settings as SettingsIcon, Bell, Shield, Database, Clock, Lock } from 'lucide-react'
 import { fetchSettings, saveSettings } from '../api/priceApi'
+import api from '../api/priceApi'
 
 const DEFAULTS = {
   CHECK_FREQUENCY_HOURS: '2',
@@ -147,6 +148,58 @@ export default function Settings() {
               className="input text-sm" placeholder="manager@shorttrip.com" style={{ width: 240 }} />
           </Field>
         )}
+      </Section>
+
+      {/* Change Password */}
+      <Section icon={Lock} title="Change Password">
+        <Field label="Current Password" sub="Enter your current login password">
+          <input
+            type="password"
+            value={settings._currentPw || ''}
+            onChange={e => set('_currentPw', e.target.value)}
+            className="input text-sm"
+            placeholder="Current password"
+            autoComplete="current-password"
+            style={{ width: 240 }}
+          />
+        </Field>
+        <Field label="New Password" sub="At least 8 characters">
+          <input
+            type="password"
+            value={settings._newPw || ''}
+            onChange={e => set('_newPw', e.target.value)}
+            className="input text-sm"
+            placeholder="New password"
+            autoComplete="new-password"
+            style={{ width: 240 }}
+          />
+        </Field>
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            onClick={async () => {
+              if (!settings._currentPw || !settings._newPw) return
+              if (settings._newPw.length < 8) { alert('Password must be at least 8 characters'); return }
+              try {
+                await api.post('/auth/change-password', {
+                  current_password: settings._currentPw,
+                  new_password: settings._newPw
+                })
+                set('_currentPw', '')
+                set('_newPw', '')
+                alert('✅ Password changed successfully!')
+              } catch (err) {
+                alert(err.response?.data?.error || 'Failed to change password')
+              }
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all hover:opacity-90"
+            style={{ background: 'var(--color-primary)' }}
+          >
+            Update Password
+          </button>
+          {settings._currentPw && settings._newPw && settings._newPw.length < 8 && (
+            <span className="text-xs" style={{ color: '#EF4444' }}>Minimum 8 characters</span>
+          )}
+        </div>
       </Section>
 
       {/* System Info */}

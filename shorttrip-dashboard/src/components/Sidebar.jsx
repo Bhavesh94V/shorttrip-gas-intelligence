@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../App'
 import {
   LayoutDashboard, MapPin, Bell, History,
-  Users, Settings, LogOut, Fuel, ChevronRight, Map
+  Users, Settings, LogOut, Fuel, ChevronRight, Map, TrendingDown
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { fetchAlertSummary } from '../api/priceApi'
@@ -13,12 +13,13 @@ const navItems = [
   { to: '/stores',    icon: MapPin,           label: 'All Stores' },
   { to: '/map',       icon: Map,              label: 'Store Map' },
   { to: '/alerts',    icon: Bell,             label: 'Alerts',    badge: true },
+  { to: '/revenue',   icon: TrendingDown,     label: 'Revenue Impact' },
   { to: '/history',   icon: History,          label: 'Price History' },
   { to: '/workers',   icon: Users,            label: 'Workers' },
   { to: '/settings',  icon: Settings,         label: 'Settings' },
 ]
 
-export default function Sidebar() {
+export default function Sidebar({ onNavigate }) {
   const { logout, user } = useAuth()
   const navigate = useNavigate()
   const [alertCount, setAlertCount] = useState(0)
@@ -82,6 +83,7 @@ export default function Sidebar() {
           <NavLink
             key={to}
             to={to}
+            onClick={onNavigate}
             className={({ isActive }) =>
               `sidebar-item ${isActive ? 'active' : ''} ${collapsed ? 'justify-center' : ''}`
             }

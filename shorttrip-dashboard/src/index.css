@@ -176,3 +176,59 @@ button, a, input, select { transition: all 0.2s ease; }
   color: var(--color-primary);
   border-left: 3px solid var(--color-primary);
 }
+
+/* ── Animations ───────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease both;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slideIn 0.25s ease both;
+}
+
+/* ── Mobile Responsive Utilities ─────────────────────────────── */
+@media (max-width: 768px) {
+  .card { padding: 14px; border-radius: 10px; }
+
+  /* Hide sidebar text on very small screens */
+  .sidebar-item span { font-size: 13px; }
+
+  /* Table horizontal scroll on mobile */
+  table { min-width: 600px; }
+  .table-scroll-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Smaller gaps on mobile */
+  .gap-6 { gap: 1rem; }
+}
+
+@media (max-width: 480px) {
+  main { padding: 12px !important; }
+  .card { padding: 12px; }
+  h1 { font-size: 1.2rem !important; }
+}
+
+/* ── iOS Safe Area ───────────────────────────────────────────── */
+@supports (padding: env(safe-area-inset-bottom)) {
+  main {
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Touch Action Optimization ───────────────────────────────── */
+button { touch-action: manipulation; }
+a      { touch-action: manipulation; }
+
+/* ── No Text Select on UI Elements ──────────────────────────── */
+button, .badge, .sidebar-item {
+  -webkit-user-select: none;
+  user-select: none;
+}
+

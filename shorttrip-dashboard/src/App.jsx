@@ -10,6 +10,7 @@ import Workers from './pages/Workers'
 import Settings from './pages/Settings'
 import AllStores from './pages/AllStores'
 import MapView from './pages/MapView'
+import RevenueCalculator from './pages/RevenueCalculator'
 import ErrorBoundary from './components/ErrorBoundary'
 
 // ── Auth Context ──────────────────────────────────────────────
@@ -77,6 +78,7 @@ export default function App() {
               <Route path="history"      element={<History />} />
               <Route path="workers"      element={<Workers />} />
               <Route path="map"          element={<MapView />} />
+              <Route path="revenue"      element={<RevenueCalculator />} />
               <Route path="settings"     element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

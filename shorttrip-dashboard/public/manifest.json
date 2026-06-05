@@ -1,0 +1,42 @@
+{
+  "name": "Short Trip Price Intelligence",
+  "short_name": "ShortTrip",
+  "description": "Real-time competitor gas price monitoring for Short Trip Gas Stations",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#0A0A0F",
+  "theme_color": "#E31E24",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.webp",
+      "sizes": "192x192",
+      "type": "image/webp",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["business", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard",
+      "description": "View all store alerts"
+    },
+    {
+      "name": "Alerts",
+      "url": "/alerts",
+      "description": "View active price alerts"
+    },
+    {
+      "name": "Store Map",
+      "url": "/map",
+      "description": "View all store locations"
+    }
+  ]
+}

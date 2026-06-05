@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../App'
 import {
   LayoutDashboard, MapPin, Bell, History,
-  Users, Settings, LogOut, Fuel, ChevronRight, Map, TrendingDown
+  Users, Settings, LogOut, Fuel, ChevronRight, Map, TrendingDown, FileText
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { fetchAlertSummary } from '../api/priceApi'
@@ -12,8 +12,9 @@ const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/stores',    icon: MapPin,           label: 'All Stores' },
   { to: '/map',       icon: Map,              label: 'Store Map' },
-  { to: '/alerts',    icon: Bell,             label: 'Alerts',    badge: true },
+  { to: '/alerts',    icon: Bell,             label: 'Alerts',        badge: true },
   { to: '/revenue',   icon: TrendingDown,     label: 'Revenue Impact' },
+  { to: '/reports',   icon: FileText,         label: 'Reports' },
   { to: '/history',   icon: History,          label: 'Price History' },
   { to: '/workers',   icon: Users,            label: 'Workers' },
   { to: '/settings',  icon: Settings,         label: 'Settings' },

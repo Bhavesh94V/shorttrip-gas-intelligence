@@ -100,6 +100,18 @@ export const fetchSettings = () =>
 export const saveSettings = (settings) =>
   api.put('/settings', { settings }).then(r => r.data)
 
+export const updateStorePrices = (id, prices) =>
+  api.patch(`/stores/${id}/prices`, prices).then(r => r.data)
+
+export const fetchReportSummary = () =>
+  api.get('/stores/export/summary').then(r => r.data)
+
+export const exportCSV = (days = 7, store_id = null) => {
+  const params = new URLSearchParams({ days })
+  if (store_id) params.append('store_id', store_id)
+  return api.get(`/stores/export/csv?${params}`, { responseType: 'blob' }).then(r => r.data)
+}
+
 // ── Mock data for offline/dev without backend ─────────────────
 export const MOCK_STORES = [
   { id:1,  name:'614 US-78, Ridgeville',       our_price:3.350, best_comp_name:'Shell',   best_comp_price:3.190, price_diff:-0.160, price_status:'alert',   active_alerts:1, last_checked: new Date().toISOString() },

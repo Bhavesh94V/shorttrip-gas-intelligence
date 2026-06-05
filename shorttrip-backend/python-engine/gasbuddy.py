@@ -63,8 +63,8 @@ _GB_HEADERS = {
     "Accept-Language":               "en-US,en;q=0.9",
 }
 _GB_QUERY = """
-query LocationBySearchTerm($lat: Float, $lng: Float, $search: String) {
-  locationBySearchTerm(lat: $lat, lng: $lng, search: $search) {
+query LocationBySearchTerm($lat: Float, $lng: Float) {
+  locationBySearchTerm(lat: $lat, lng: $lng) {
     stations {
       results {
         id
@@ -202,8 +202,7 @@ async def _fetch_from_gasbuddy_graphql(
         "operationName": "LocationBySearchTerm",
         "variables": {
             "lat": lat,
-            "lng": lng,
-            "search": station_name or ""
+            "lng": lng
         },
         "query": _GB_QUERY
     }

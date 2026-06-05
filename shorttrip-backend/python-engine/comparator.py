@@ -204,6 +204,7 @@ def build_daily_summary(stores_results: list) -> str:
     alert_count = sum(1 for r in stores_results if r.get("action") == "alert")
     ok_count = sum(1 for r in stores_results if r.get("action") == "ok")
     monitor_count = sum(1 for r in stores_results if r.get("action") == "monitor")
+    total_alerts_today = sum(r.get("today_alerts", 0) for r in stores_results)
 
     summary = f"""
 SHORT TRIP — Daily Price Intelligence Summary
@@ -213,6 +214,7 @@ OVERVIEW:
   🔴 Stores needing attention: {alert_count}
   🟡 Stores to monitor: {monitor_count}
   🟢 Competitive stores: {ok_count}
+  📊 Total alerts today: {total_alerts_today}
 
 STORE BREAKDOWN:
 """
@@ -220,16 +222,33 @@ STORE BREAKDOWN:
         store_name = result.get("store_name", "Unknown")
         action = result.get("action", "skip").upper()
         our_price = result.get("our_price")
-        best_comp = result.get("best_competitor", {})
 
-        if our_price and best_comp:
+        # Handle both dict and flat formats
+        best_comp = result.get("best_competitor", {})
+        if isinstance(best_comp, dict):
             comp_name = best_comp.get("name", "N/A")
             comp_price = best_comp.get("price", 0)
-            diff = result.get("price_diff", 0)
-            status_icon = {"ALERT": "🔴", "MONITOR": "🟡", "OK": "🟢", "SKIP": "⚪"}.get(action, "⚪")
-            summary += f"  {status_icon} {store_name}: Our ${our_price:.3f} | Best: {comp_name} ${comp_price:.3f} ({diff:+.3f})\n"
+        else:
+            comp_name = best_comp or result.get("comp_name", "N/A")
+            comp_price = result.get("comp_price", 0)
+
+        diff = result.get("price_diff", 0)
+        today_alerts = result.get("today_alerts", 0)
+        source = result.get("source", "")
+        status_icon = {"ALERT": "🔴", "MONITOR": "🟡", "OK": "🟢", "SKIP": "⚪", "FALLBACK": "🔵", "ERROR": "❌"}.get(action, "⚪")
+
+        if our_price and comp_price:
+            alert_tag = f" [{today_alerts} alerts]" if today_alerts > 0 else ""
+            summary += f"  {status_icon} {store_name}: Our ${our_price:.3f} | Best: {comp_name} ${comp_price:.3f} ({diff:+.3f}){alert_tag}\n"
+        elif our_price:
+            summary += f"  {status_icon} {store_name}: Our ${our_price:.3f} | No competitor data\n"
         else:
             summary += f"  ⚪ {store_name}: No data available\n"
 
-    summary += "\n— Short Trip Gas Price Intelligence System (GarudX.AI)"
+    summary += f"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Dashboard: https://shorttrip-gas-intelligence.netlify.app
+— Short Trip Gas Price Intelligence System (GarudX.AI)
+"""
     return summary
+

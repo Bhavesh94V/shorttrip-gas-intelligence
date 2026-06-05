@@ -344,8 +344,45 @@ async def execute_store_check(store_id: int):
 
         # Step 5: Send alert if needed
         if comparison_result['action'] == 'alert':
+            # Load workers for this store (needed for SMS/WhatsApp routing)
+            try:
+                conn = get_db_connection()
+                import psycopg2.extras
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute(
+                    "SELECT * FROM workers WHERE store_id = %s AND active = true",
+                    (store_id,)
+                )
+                workers = cursor.fetchall()
+                cursor.close()
+                conn.close()
+                store['workers'] = [dict(w) for w in workers]
+                logger.info(f"  [WORKERS] Loaded {len(workers)} active workers for notifications")
+            except Exception as e:
+                logger.warning(f"  [WORKERS] Could not load workers: {e}")
+                store['workers'] = []
+
             await send_alert_notification(store, comparison_result)
             await save_alert(store_id, comparison_result)
+
+            # Send email alert for HIGH priority (immediate email in addition to dashboard)
+            if comparison_result.get('priority') == 'HIGH':
+                try:
+                    from notifier import send_daily_summary_email
+                    email_body = (
+                        f"🚨 HIGH PRIORITY PRICE ALERT\n\n"
+                        f"Store: {store.get('name')}\n"
+                        f"Our Price: ${comparison_result.get('our_price', 0):.3f}\n"
+                        f"Competitor: {comparison_result.get('best_competitor', {}).get('name', 'Unknown')}\n"
+                        f"Comp Price: ${comparison_result.get('best_competitor', {}).get('price', 0):.3f}\n"
+                        f"Difference: ${comparison_result.get('price_diff', 0):.3f}\n\n"
+                        f"Action Required: Lower price immediately to stay competitive.\n"
+                        f"Dashboard: https://shorttrip-gas-intelligence.netlify.app/stores/{store_id}\n"
+                    )
+                    await send_daily_summary_email(email_body)
+                    logger.info(f"  [EMAIL] HIGH priority email alert sent")
+                except Exception as e:
+                    logger.warning(f"  [EMAIL] Alert email failed: {e}")
 
         logger.info(f"  [OK] Store {store['name']}: {comparison_result['action'].upper()}")
         return comparison_result

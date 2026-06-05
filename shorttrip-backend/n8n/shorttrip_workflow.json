@@ -21,7 +21,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:8000/engine/run",
+        "url": "={{$env.PYTHON_ENGINE_URL || 'https://shorttrip-python-engine.onrender.com'}}/engine/run",
         "options": {}
       },
       "id": "trigger-price-check",
@@ -49,8 +49,8 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "http://localhost:8000/engine/daily-summary",
+        "method": "POST",
+        "url": "={{$env.PYTHON_ENGINE_URL || 'https://shorttrip-python-engine.onrender.com'}}/engine/daily-summary",
         "options": {}
       },
       "id": "trigger-daily-summary",
@@ -104,7 +104,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://localhost:3001/api/alerts/internal",
+        "url": "={{$env.NODE_API_URL || 'https://shorttrip-node-api.onrender.com'}}/api/alerts/internal",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

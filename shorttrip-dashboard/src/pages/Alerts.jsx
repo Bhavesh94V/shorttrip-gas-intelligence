@@ -41,11 +41,18 @@ export default function Alerts() {
     setAlerts(a => a.map(x => ({ ...x, acknowledged: true })))
   }
 
-  const handleNotify = async (alert) => {
+  const [notifyStatus, setNotifyStatus] = useState({}) // { alertId: 'sending' | 'sent' | 'error' }
+
+  const handleNotify = async (alertItem) => {
+    setNotifyStatus(s => ({ ...s, [alertItem.id]: 'sending' }))
     try {
-      await notifyAlert(alert.id)
-      alert(`✅ Notification sent for ${alert.store_name}`)
-    } catch { alert('Notification failed') }
+      await notifyAlert(alertItem.id)
+      setNotifyStatus(s => ({ ...s, [alertItem.id]: 'sent' }))
+      setTimeout(() => setNotifyStatus(s => { const n = {...s}; delete n[alertItem.id]; return n }), 3000)
+    } catch {
+      setNotifyStatus(s => ({ ...s, [alertItem.id]: 'error' }))
+      setTimeout(() => setNotifyStatus(s => { const n = {...s}; delete n[alertItem.id]; return n }), 3000)
+    }
   }
 
   const timeAgo = (iso) => {
@@ -143,9 +150,18 @@ export default function Alerts() {
             <div className="flex items-center gap-2 flex-shrink-0">
               {!alert.acknowledged && (
                 <button onClick={() => handleNotify(alert)}
-                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                  style={{ background: 'var(--color-primary)' }}>
-                  <Bell size={11} />Notify
+                  disabled={notifyStatus[alert.id] === 'sending'}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all"
+                  style={{
+                    background: notifyStatus[alert.id] === 'sent' ? '#22C55E'
+                      : notifyStatus[alert.id] === 'error' ? '#EF4444'
+                      : 'var(--color-primary)'
+                  }}>
+                  <Bell size={11} />
+                  {notifyStatus[alert.id] === 'sending' ? 'Sending...'
+                    : notifyStatus[alert.id] === 'sent' ? 'Sent ✓'
+                    : notifyStatus[alert.id] === 'error' ? 'Failed'
+                    : 'Notify'}
                 </button>
               )}
               <button onClick={() => navigate(`/stores/${alert.store_id}`)}

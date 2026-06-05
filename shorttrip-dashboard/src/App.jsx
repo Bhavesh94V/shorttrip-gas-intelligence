@@ -9,6 +9,7 @@ import History from './pages/History'
 import Workers from './pages/Workers'
 import Settings from './pages/Settings'
 import AllStores from './pages/AllStores'
+import MapView from './pages/MapView'
 
 // ── Auth Context ──────────────────────────────────────────────
 export const AuthContext = createContext(null)
@@ -73,6 +74,7 @@ export default function App() {
               <Route path="alerts"       element={<Alerts />} />
               <Route path="history"      element={<History />} />
               <Route path="workers"      element={<Workers />} />
+              <Route path="map"          element={<MapView />} />
               <Route path="settings"     element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -52,15 +52,20 @@ _EIA_CACHE_TTL_HOURS = 3   # refresh every 3 hours
 _gb_cache: dict = {}          # key: "lat,lng" → {price, fetched_at}
 _GB_CACHE_TTL_MINUTES = 30
 
-# GasBuddy GraphQL endpoint + headers (mimics iOS GasBuddy 7.2.0 app)
+# GasBuddy GraphQL endpoint + headers (mimics Chrome browser on gasbuddy.com)
 _GB_GRAPHQL_URL = "https://www.gasbuddy.com/graphql"
 _GB_HEADERS = {
-    "User-Agent":                    "GasBuddyApp/7.2.0 CFNetwork/1494.0.7 Darwin/23.4.0",
-    "apollographql-client-name":     "com.gasbuddy.app",
-    "apollographql-client-version":  "7.2.0",
+    "User-Agent":                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "apollographql-client-name":     "web",
+    "apollographql-client-version":  "2.0.0",
     "Accept":                        "application/json",
     "Content-Type":                  "application/json",
     "Accept-Language":               "en-US,en;q=0.9",
+    "Origin":                        "https://www.gasbuddy.com",
+    "Referer":                        "https://www.gasbuddy.com/",
+    "sec-fetch-dest":                "empty",
+    "sec-fetch-mode":                "cors",
+    "sec-fetch-site":                "same-origin",
 }
 _GB_QUERY = """
 query LocationBySearchTerm($lat: Float, $lng: Float) {

@@ -277,35 +277,29 @@ async def _fetch_from_apify(
         return {}
 
     # ── Try name-based fuzzy match ────────────────────────────────
-    if stations:
-        # Debug: log ALL keys of first station to find correct price field
-        first_station = stations[0]
-        all_keys = list(first_station.keys())
-        logger.info(f"  [Apify] ALL fields: {all_keys}")
-        logger.info(f"  [Apify] Sample data: {dict(list(first_station.items())[:12])}")
+    if stations and not hasattr(_fetch_from_apify, '_logged_zip'):
+        # Log schema once (already logged per ZIP in _fetch_from_apify_zip)
+        pass  # Schema logged above in ZIP fetch
 
     def _extract_price(s):
         """
-        Try every known field name + nested 'prices' array/dict.
-        GasBuddy actors often return: prices=[{fuelType:'regular', price:3.58}]
+        Apify johnvc/fuelprices returns: price_credit, price_cash (with underscore).
+        Also try legacy field names for robustness.
         """
-        # 1. Direct top-level fields
+        # Primary Apify fields (price_credit, price_cash)
         raw = (
+            s.get("price_credit") or s.get("price_cash") or
             s.get("regular") or s.get("credit") or s.get("price") or
-            s.get("cash") or s.get("regularPrice") or s.get("regularCredit") or
-            s.get("Regular") or s.get("gasolinePrice") or s.get("unleaded") or
-            s.get("fuelPrice") or s.get("gasPrice") or s.get("priceValue") or
-            s.get("regularGasPrice") or s.get("unitPrice")
+            s.get("cash") or s.get("regularPrice") or s.get("price_regular") or
+            s.get("gasolinePrice") or s.get("unleaded") or s.get("fuelPrice")
         )
 
-        # 2. Nested prices dict: {"prices": {"regular": 3.58}}
+        # Nested prices dict: {"prices": {"regular": 3.58}}
         if raw is None:
             nested = s.get("prices") or s.get("fuelPrices") or s.get("gasPrices")
             if isinstance(nested, dict):
-                raw = (nested.get("regular") or nested.get("Regular") or
-                       nested.get("unleaded") or nested.get("credit") or
-                       nested.get("price") or list(nested.values())[0] if nested else None)
-            # 3. Nested prices array: {"prices": [{"fuelType":"regular","price":3.58}]}
+                raw = (nested.get("regular") or nested.get("credit") or
+                       nested.get("price") or (list(nested.values())[0] if nested else None))
             elif isinstance(nested, list):
                 for item in nested:
                     if isinstance(item, dict):

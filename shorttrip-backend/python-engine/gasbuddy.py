@@ -277,54 +277,70 @@ async def _fetch_from_apify(
         return {}
 
     # ── Try name-based fuzzy match ────────────────────────────────
+    if stations:
+        # Debug: log first station's keys once to understand the field schema
+        first_keys = list(stations[0].keys()) if stations else []
+        logger.debug(f"  [Apify] Station fields: {first_keys}")
+        logger.info(f"  [Apify] Sample: {stations[0].get('name')} → fields={first_keys[:8]}")
+
+    def _extract_price(s):
+        """Try multiple field names, handle string prices like '$3.58'."""
+        raw = (
+            s.get("regular") or s.get("credit") or s.get("price") or
+            s.get("cash") or s.get("regularPrice") or s.get("regularCredit") or
+            s.get("Regular") or s.get("gasolinePrice") or s.get("unleaded")
+        )
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            raw = raw.replace("$", "").replace(",", "").strip()
+        try:
+            val = float(raw)
+            return val if 2.0 < val < 8.0 else None
+        except (TypeError, ValueError):
+            return None
+
     if station_name:
         name_words = [w for w in station_name.lower().split() if len(w) > 3]
         for station in stations:
             s_name = (station.get("name") or "").lower()
             if any(word in s_name for word in name_words):
-                price_val = station.get("credit") or station.get("price") or station.get("cash")
-                try:
-                    price_float = float(price_val)
-                    if 2.0 < price_float < 8.0:
-                        logger.info(
-                            f"  [Apify] ✅ Matched '{station.get('name')}' → ${price_float}"
-                        )
-                        return {
-                            "price":        price_float,
-                            "source":       "apify_gasbuddy",
-                            "station_name": station.get("name", ""),
-                            "fuel_type":    "regular",
-                            "posted_time":  station.get("lastUpdated", ""),
-                            "last_updated": datetime.now().isoformat()
-                        }
-                except (TypeError, ValueError):
-                    continue
+                price_float = _extract_price(station)
+                if price_float:
+                    logger.info(
+                        f"  [Apify] ✅ Matched '{station.get('name')}' → ${price_float}"
+                    )
+                    return {
+                        "price":        price_float,
+                        "source":       "apify_gasbuddy",
+                        "station_name": station.get("name", ""),
+                        "fuel_type":    "regular",
+                        "posted_time":  station.get("lastUpdated", ""),
+                        "last_updated": datetime.now().isoformat()
+                    }
 
     # ── Fallback: nearest station with valid price ─────────────────
     import math
     def _dist(s):
-        slat = float(s.get("latitude") or lat)
-        slng = float(s.get("longitude") or lng)
+        # Apify uses 'lat'/'lng' or 'latitude'/'longitude'
+        slat = float(s.get("lat") or s.get("latitude") or lat)
+        slng = float(s.get("lng") or s.get("longitude") or lng)
         return math.sqrt((slat - lat) ** 2 + (slng - lng) ** 2)
 
-    for station in sorted(stations, key=_dist)[:3]:
-        price_val = station.get("credit") or station.get("price") or station.get("cash")
-        try:
-            price_float = float(price_val)
-            if 2.0 < price_float < 8.0:
-                logger.info(
-                    f"  [Apify] ✅ Nearest match '{station.get('name')}' → ${price_float}"
-                )
-                return {
-                    "price":        price_float,
-                    "source":       "apify_gasbuddy_nearest",
-                    "station_name": station.get("name", ""),
-                    "fuel_type":    "regular",
-                    "posted_time":  station.get("lastUpdated", ""),
-                    "last_updated": datetime.now().isoformat()
-                }
-        except (TypeError, ValueError):
-            continue
+    for station in sorted(stations, key=_dist)[:5]:
+        price_float = _extract_price(station)
+        if price_float:
+            logger.info(
+                f"  [Apify] ✅ Nearest match '{station.get('name')}' → ${price_float}"
+            )
+            return {
+                "price":        price_float,
+                "source":       "apify_gasbuddy_nearest",
+                "station_name": station.get("name", ""),
+                "fuel_type":    "regular",
+                "posted_time":  station.get("lastUpdated", ""),
+                "last_updated": datetime.now().isoformat()
+            }
 
     return {}
 

@@ -278,18 +278,43 @@ async def _fetch_from_apify(
 
     # ── Try name-based fuzzy match ────────────────────────────────
     if stations:
-        # Debug: log first station's keys once to understand the field schema
-        first_keys = list(stations[0].keys()) if stations else []
-        logger.debug(f"  [Apify] Station fields: {first_keys}")
-        logger.info(f"  [Apify] Sample: {stations[0].get('name')} → fields={first_keys[:8]}")
+        # Debug: log ALL keys of first station to find correct price field
+        first_station = stations[0]
+        all_keys = list(first_station.keys())
+        logger.info(f"  [Apify] ALL fields: {all_keys}")
+        logger.info(f"  [Apify] Sample data: {dict(list(first_station.items())[:12])}")
 
     def _extract_price(s):
-        """Try multiple field names, handle string prices like '$3.58'."""
+        """
+        Try every known field name + nested 'prices' array/dict.
+        GasBuddy actors often return: prices=[{fuelType:'regular', price:3.58}]
+        """
+        # 1. Direct top-level fields
         raw = (
             s.get("regular") or s.get("credit") or s.get("price") or
             s.get("cash") or s.get("regularPrice") or s.get("regularCredit") or
-            s.get("Regular") or s.get("gasolinePrice") or s.get("unleaded")
+            s.get("Regular") or s.get("gasolinePrice") or s.get("unleaded") or
+            s.get("fuelPrice") or s.get("gasPrice") or s.get("priceValue") or
+            s.get("regularGasPrice") or s.get("unitPrice")
         )
+
+        # 2. Nested prices dict: {"prices": {"regular": 3.58}}
+        if raw is None:
+            nested = s.get("prices") or s.get("fuelPrices") or s.get("gasPrices")
+            if isinstance(nested, dict):
+                raw = (nested.get("regular") or nested.get("Regular") or
+                       nested.get("unleaded") or nested.get("credit") or
+                       nested.get("price") or list(nested.values())[0] if nested else None)
+            # 3. Nested prices array: {"prices": [{"fuelType":"regular","price":3.58}]}
+            elif isinstance(nested, list):
+                for item in nested:
+                    if isinstance(item, dict):
+                        ft = (item.get("fuelType") or item.get("type") or "").lower()
+                        if "regular" in ft or "unleaded" in ft or ft == "":
+                            raw = item.get("price") or item.get("value") or item.get("amount")
+                            if raw:
+                                break
+
         if raw is None:
             return None
         if isinstance(raw, str):

@@ -44,6 +44,16 @@ EIA_SC_AREA     = "R30"   # South Atlantic region (includes SC)
 TOMTOM_API_KEY   = os.getenv("TOMTOM_API_KEY", "")
 TOMTOM_SEARCH_URL = "https://api.tomtom.com/search/2/nearbySearch/.json"
 
+# ── Apify (johnvc/fuelprices) — Real GasBuddy prices by ZIP ─────
+# ONE call per ZIP → returns ALL stations → cached 2 hours
+APIFY_API_TOKEN  = os.getenv("APIFY_API_TOKEN", "")
+APIFY_ACTOR_ID   = os.getenv("APIFY_ACTOR_ID", "johnvc/fuelprices")
+APIFY_RUN_URL    = "https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items"
+
+# Apify ZIP-level cache (one call per ZIP, reuse for all competitors in that ZIP)
+_apify_zip_cache: dict = {}   # key: zip_code → {stations: [...], fetched_at}
+_APIFY_CACHE_TTL_MINUTES = 120  # 2 hours — matches our check frequency
+
 # ── EIA Cache (avoid hammering API per competitor) ─────────────
 _eia_cache: dict = {"price": None, "fetched_at": None}
 _EIA_CACHE_TTL_HOURS = 3   # refresh every 3 hours
@@ -115,6 +125,16 @@ async def fetch_gasbuddy_prices(
     lat = float(lat)
     lng = float(lng)
 
+    # ─── Priority 0: Apify (johnvc/fuelprices) ─────────────────────────────
+    # ONE Apify call per ZIP → all competitors in that ZIP get REAL prices from cache
+    if zip_code and APIFY_API_TOKEN:
+        result = await _try(
+            _fetch_from_apify(lat, lng, station_name, zip_code),
+            "Apify-GasBuddy"
+        )
+        if result:
+            return result
+
     # 0 — GasBuddy GraphQL Direct (custom iOS-app mimicry — per-station real prices)
     result = await _try(
         _fetch_from_gasbuddy_graphql(lat, lng, station_name),
@@ -185,6 +205,129 @@ async def batch_fetch_prices(competitors: list) -> list:
 # ══════════════════════════════════════════════════════════════════
 # PRICE SOURCES
 # ══════════════════════════════════════════════════════════════════
+
+async def _fetch_from_apify_zip(zip_code: str) -> list:
+    """
+    Fetch ALL gas station prices in a ZIP code via Apify (johnvc/fuelprices).
+    ONE call per ZIP — results cached 2 hours.
+    Returns list of station dicts: [{name, address, credit, cash, ...}]
+    """
+    global _apify_zip_cache
+
+    # Return from cache if fresh
+    if zip_code in _apify_zip_cache:
+        cached = _apify_zip_cache[zip_code]
+        age = datetime.now() - cached["fetched_at"]
+        if age < timedelta(minutes=_APIFY_CACHE_TTL_MINUTES):
+            logger.debug(f"  [Apify] Cache hit for ZIP {zip_code} ({len(cached['stations'])} stations)")
+            return cached["stations"]
+
+    if not APIFY_API_TOKEN:
+        return []
+
+    url = APIFY_RUN_URL.format(actor=APIFY_ACTOR_ID.replace("/", "~"))
+    params = {
+        "token": APIFY_API_TOKEN,
+        "memory": 128,        # minimum RAM (cheapest run)
+        "timeout": 120,       # max 2 min per run
+    }
+    payload = {"search": zip_code, "fuel": 1, "maxAge": 0}
+
+    try:
+        # Apify sync run can take 30-60 seconds — use generous timeout
+        async with httpx.AsyncClient(timeout=130, follow_redirects=True) as client:
+            logger.info(f"  [Apify] Calling API for ZIP {zip_code}...")
+            resp = await client.post(url, json=payload, params=params)
+
+            if resp.status_code != 200:
+                logger.debug(f"  [Apify] HTTP {resp.status_code} for ZIP {zip_code}")
+                return []
+
+            stations = resp.json()
+            if not isinstance(stations, list):
+                stations = []
+
+            # Store in cache
+            _apify_zip_cache[zip_code] = {
+                "stations": stations,
+                "fetched_at": datetime.now()
+            }
+            logger.info(f"  [Apify] ✅ ZIP {zip_code}: {len(stations)} stations fetched")
+            return stations
+
+    except Exception as e:
+        logger.debug(f"  [Apify] ZIP {zip_code} error: {e}")
+        return []
+
+
+async def _fetch_from_apify(
+    lat: float, lng: float,
+    station_name: Optional[str] = None,
+    zip_code: Optional[str] = None
+) -> dict:
+    """
+    Match a specific competitor station with Apify ZIP price data.
+    Uses cached ZIP data — no extra API calls if ZIP already fetched.
+    """
+    if not zip_code or not APIFY_API_TOKEN:
+        return {}
+
+    stations = await _fetch_from_apify_zip(zip_code)
+    if not stations:
+        return {}
+
+    # ── Try name-based fuzzy match ────────────────────────────────
+    if station_name:
+        name_words = [w for w in station_name.lower().split() if len(w) > 3]
+        for station in stations:
+            s_name = (station.get("name") or "").lower()
+            if any(word in s_name for word in name_words):
+                price_val = station.get("credit") or station.get("price") or station.get("cash")
+                try:
+                    price_float = float(price_val)
+                    if 2.0 < price_float < 8.0:
+                        logger.info(
+                            f"  [Apify] ✅ Matched '{station.get('name')}' → ${price_float}"
+                        )
+                        return {
+                            "price":        price_float,
+                            "source":       "apify_gasbuddy",
+                            "station_name": station.get("name", ""),
+                            "fuel_type":    "regular",
+                            "posted_time":  station.get("lastUpdated", ""),
+                            "last_updated": datetime.now().isoformat()
+                        }
+                except (TypeError, ValueError):
+                    continue
+
+    # ── Fallback: nearest station with valid price ─────────────────
+    import math
+    def _dist(s):
+        slat = float(s.get("latitude") or lat)
+        slng = float(s.get("longitude") or lng)
+        return math.sqrt((slat - lat) ** 2 + (slng - lng) ** 2)
+
+    for station in sorted(stations, key=_dist)[:3]:
+        price_val = station.get("credit") or station.get("price") or station.get("cash")
+        try:
+            price_float = float(price_val)
+            if 2.0 < price_float < 8.0:
+                logger.info(
+                    f"  [Apify] ✅ Nearest match '{station.get('name')}' → ${price_float}"
+                )
+                return {
+                    "price":        price_float,
+                    "source":       "apify_gasbuddy_nearest",
+                    "station_name": station.get("name", ""),
+                    "fuel_type":    "regular",
+                    "posted_time":  station.get("lastUpdated", ""),
+                    "last_updated": datetime.now().isoformat()
+                }
+        except (TypeError, ValueError):
+            continue
+
+    return {}
+
 
 async def _fetch_from_gasbuddy_graphql(
     lat: float, lng: float, station_name: str = None

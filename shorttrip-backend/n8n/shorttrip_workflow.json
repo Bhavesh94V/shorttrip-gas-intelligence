@@ -1,5 +1,5 @@
 {
-  "name": "Short Trip Gas Price Intelligence",
+  "name": "Short Trip Gas Intelligence (Apify Edition)",
   "nodes": [
     {
       "parameters": {
@@ -16,19 +16,151 @@
       "name": "Every 2 Hours",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [180, 200]
+      "position": [160, 300]
     },
     {
       "parameters": {
         "method": "POST",
         "url": "={{$env.PYTHON_ENGINE_URL || 'https://shorttrip-python-engine.onrender.com'}}/engine/run",
-        "options": {}
+        "options": { "timeout": 300000 }
       },
-      "id": "trigger-price-check",
-      "name": "Trigger Price Check (Python Engine)",
+      "id": "trigger-python-engine",
+      "name": "Step 1: Discover Competitors (OpenStreetMap)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [420, 200]
+      "position": [400, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/johnvc~fuelprices/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "={{$env.APIFY_API_TOKEN}}" },
+            { "name": "memory", "value": "128" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"search\": \"29472\", \"fuel\": 1, \"maxAge\": 0}",
+        "options": { "timeout": 130000 }
+      },
+      "id": "apify-ridgeville",
+      "name": "Apify: Ridgeville ZIP 29472",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/johnvc~fuelprices/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "={{$env.APIFY_API_TOKEN}}" },
+            { "name": "memory", "value": "128" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"search\": \"29456\", \"fuel\": 1, \"maxAge\": 0}",
+        "options": { "timeout": 130000 }
+      },
+      "id": "apify-ladson",
+      "name": "Apify: Ladson ZIP 29456",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 520]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/johnvc~fuelprices/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "={{$env.APIFY_API_TOKEN}}" },
+            { "name": "memory", "value": "128" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"search\": \"29154\", \"fuel\": 1, \"maxAge\": 0}",
+        "options": { "timeout": 130000 }
+      },
+      "id": "apify-sumter",
+      "name": "Apify: Sumter ZIP 29154",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 640]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/johnvc~fuelprices/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "={{$env.APIFY_API_TOKEN}}" },
+            { "name": "memory", "value": "128" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"search\": \"29461\", \"fuel\": 1, \"maxAge\": 0}",
+        "options": { "timeout": 130000 }
+      },
+      "id": "apify-moncks",
+      "name": "Apify: Moncks Corner ZIP 29461",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 760]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/johnvc~fuelprices/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "={{$env.APIFY_API_TOKEN}}" },
+            { "name": "memory", "value": "128" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"search\": \"29102\", \"fuel\": 1, \"maxAge\": 0}",
+        "options": { "timeout": 130000 }
+      },
+      "id": "apify-manning",
+      "name": "Apify: Manning ZIP 29102",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 880]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/johnvc~fuelprices/run-sync-get-dataset-items",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "token", "value": "={{$env.APIFY_API_TOKEN}}" },
+            { "name": "memory", "value": "128" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"search\": \"29118\", \"fuel\": 1, \"maxAge\": 0}",
+        "options": { "timeout": 130000 }
+      },
+      "id": "apify-orangeburg",
+      "name": "Apify: Orangeburg ZIP 29118",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [400, 1000]
     },
     {
       "parameters": {
@@ -45,7 +177,7 @@
       "name": "Daily 8AM Summary",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [180, 400]
+      "position": [160, 1160]
     },
     {
       "parameters": {
@@ -57,7 +189,7 @@
       "name": "Send Daily Email Summary",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [420, 400]
+      "position": [400, 1160]
     },
     {
       "parameters": {
@@ -70,7 +202,7 @@
       "name": "Alert Webhook (from Python Engine)",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [180, 620]
+      "position": [160, 1320]
     },
     {
       "parameters": {
@@ -99,7 +231,7 @@
       "name": "Is Alert?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [420, 620]
+      "position": [400, 1320]
     },
     {
       "parameters": {
@@ -108,14 +240,8 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "x-internal-key",
-              "value": "stGI7f4D2a9B8c3E1f6D0a5B2c9E4f7D1a8B3c6E0f5D9a2B7c4E1f8D3a6B0c5E"
-            }
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-internal-key", "value": "stGI7f4D2a9B8c3E1f6D0a5B2c9E4f7D1a8B3c6E0f5D9a2B7c4E1f8D3a6B0c5E" }
           ]
         },
         "sendBody": true,
@@ -127,7 +253,7 @@
       "name": "Save Alert to Dashboard DB",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 520]
+      "position": [660, 1220]
     },
     {
       "parameters": {
@@ -138,7 +264,7 @@
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [900, 620]
+      "position": [900, 1320]
     },
     {
       "parameters": {
@@ -146,74 +272,38 @@
         "responseBody": "={ \"status\": \"skipped\", \"action\": $json.action }"
       },
       "id": "respond-webhook-skip",
-      "name": "Respond (Not Alert)",
+      "name": "Respond (No Alert)",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [680, 740]
+      "position": [660, 1420]
     }
   ],
   "connections": {
     "Every 2 Hours": {
-      "main": [
-        [
-          {
-            "node": "Trigger Price Check (Python Engine)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[
+        { "node": "Step 1: Discover Competitors (OpenStreetMap)", "type": "main", "index": 0 },
+        { "node": "Apify: Ridgeville ZIP 29472", "type": "main", "index": 0 },
+        { "node": "Apify: Ladson ZIP 29456", "type": "main", "index": 0 },
+        { "node": "Apify: Sumter ZIP 29154", "type": "main", "index": 0 },
+        { "node": "Apify: Moncks Corner ZIP 29461", "type": "main", "index": 0 },
+        { "node": "Apify: Manning ZIP 29102", "type": "main", "index": 0 },
+        { "node": "Apify: Orangeburg ZIP 29118", "type": "main", "index": 0 }
+      ]]
     },
     "Daily 8AM Summary": {
-      "main": [
-        [
-          {
-            "node": "Send Daily Email Summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Send Daily Email Summary", "type": "main", "index": 0 }]]
     },
     "Alert Webhook (from Python Engine)": {
-      "main": [
-        [
-          {
-            "node": "Is Alert?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Is Alert?", "type": "main", "index": 0 }]]
     },
     "Is Alert?": {
       "main": [
-        [
-          {
-            "node": "Save Alert to Dashboard DB",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond (Not Alert)",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Save Alert to Dashboard DB", "type": "main", "index": 0 }],
+        [{ "node": "Respond (No Alert)", "type": "main", "index": 0 }]
       ]
     },
     "Save Alert to Dashboard DB": {
-      "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
@@ -222,6 +312,6 @@
     "callerPolicy": "workflowsFromSameOwner",
     "errorWorkflow": ""
   },
-  "tags": ["shorttrip", "garudx", "gas-price"],
+  "tags": ["shorttrip", "garudx", "gas-price", "apify"],
   "pinData": {}
 }

@@ -345,39 +345,55 @@ async def execute_store_check(store_id: int):
             competitors = await upsert_competitors(store_id, competitors)
             logger.info(f"  Saved {len(competitors)} competitors to DB")
 
-        # Step 2: Fetch regional price ONCE, then try TomTom per-station
+        # Step 2: Fetch prices — Apify (real GasBuddy prices) → TomTom → EIA fallback
         our_price = float(store.get('our_price', 0) or 0)
+        store_zip = store.get('zip') or store.get('zip_code') or ''
 
-        # Fetch state/regional benchmark price once (avoids rate limiting)
+        # Fetch regional/benchmark price ONCE per store (Apify call is cached per ZIP)
         regional_price_data = await fetch_gasbuddy_prices(
             lat=float(store['lat']),
             lng=float(store['lng']),
-            station_name=None
+            station_name=None,
+            zip_code=store_zip          # ← Apify uses this ZIP for real prices
         )
         regional_price  = regional_price_data.get('price')
         regional_source = regional_price_data.get('source', 'unknown')
         if regional_price:
-            logger.info(f"  [PRICE] Regional benchmark: ${regional_price} via {regional_source}")
+            logger.info(f"  [PRICE] Benchmark: ${regional_price} via {regional_source}")
 
         saved_count = 0
         for comp in competitors:
             try:
-                # Try TomTom for station-specific price (if API key is set)
-                from gasbuddy import TOMTOM_API_KEY, _fetch_from_tomtom
-                if TOMTOM_API_KEY:
-                    station_data = await _fetch_from_tomtom(
-                        float(comp['lat']), float(comp['lng']), comp['name']
+                # Priority 1: Apify per-station (uses ZIP cache — no extra API call!)
+                from gasbuddy import APIFY_API_TOKEN, _fetch_from_apify
+                if APIFY_API_TOKEN and store_zip:
+                    station_data = await _fetch_from_apify(
+                        float(comp['lat']), float(comp['lng']),
+                        comp['name'], store_zip
                     )
                     if station_data.get('price'):
                         comp['price']        = station_data['price']
-                        comp['price_source'] = 'tomtom'
+                        comp['price_source'] = station_data.get('source', 'apify_gasbuddy')
+                        comp['price_source_detail'] = station_data.get('station_name', '')
                     else:
                         comp['price']        = regional_price
                         comp['price_source'] = regional_source
                 else:
-                    # No TomTom key — use regional benchmark for all
-                    comp['price']        = regional_price
-                    comp['price_source'] = regional_source
+                    # Priority 2: TomTom (if no Apify token or ZIP)
+                    from gasbuddy import TOMTOM_API_KEY, _fetch_from_tomtom
+                    if TOMTOM_API_KEY:
+                        station_data = await _fetch_from_tomtom(
+                            float(comp['lat']), float(comp['lng']), comp['name']
+                        )
+                        if station_data.get('price'):
+                            comp['price']        = station_data['price']
+                            comp['price_source'] = 'tomtom'
+                        else:
+                            comp['price']        = regional_price
+                            comp['price_source'] = regional_source
+                    else:
+                        comp['price']        = regional_price
+                        comp['price_source'] = regional_source
 
                 # Save EACH competitor's price to price_history
                 if comp.get('price') and comp.get('db_id'):

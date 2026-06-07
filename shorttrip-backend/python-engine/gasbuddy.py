@@ -239,7 +239,7 @@ async def _fetch_from_apify_zip(zip_code: str) -> list:
             logger.info(f"  [Apify] Calling API for ZIP {zip_code}...")
             resp = await client.post(url, json=payload, params=params)
 
-            if resp.status_code != 200:
+            if resp.status_code not in (200, 201):
                 logger.debug(f"  [Apify] HTTP {resp.status_code} for ZIP {zip_code}")
                 return []
 
